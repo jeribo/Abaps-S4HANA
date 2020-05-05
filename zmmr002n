@@ -1,0 +1,18 @@
+REPORT zmmr002n NO STANDARD PAGE HEADING.
+
+INCLUDE zmmr002n_top.   "Tables/internal tables/ global vars
+
+INCLUDE zmmr002n_class. "Class definition
+
+INCLUDE zmmr002n_sel.   "Selection Screen
+
+INCLUDE zmmr002n_impl.  "Class Implementation
+
+INCLUDE zmmr002n_f01.   "Peforms
+
+INITIALIZATION.
+
+START-OF-SELECTION.
+  NEW lcl_alv( )->generate_alv( ). "Classe local para implementação do SALV_IDA
+
+END-OF-SELECTION.
