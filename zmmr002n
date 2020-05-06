@@ -16,3 +16,481 @@ START-OF-SELECTION.
   NEW lcl_alv( )->generate_alv( ). "Classe local para implementação do SALV_IDA
 
 END-OF-SELECTION.
+*&---------------------------------------------------------------------*
+*& Include          ZMMR002N_TOP
+*&---------------------------------------------------------------------*
+TABLES: t001w, marc, t001l, mch1, mseg, mkpf.
+
+DATA: dummy.
+&---------------------------------------------------------------------*
+*& Include          ZMMR002N_CLASS
+*&---------------------------------------------------------------------*
+CLASS lcl_alv DEFINITION.
+*----------------------------------------------------------------------
+  PUBLIC SECTION.
+    CONSTANTS: co_um_alter  TYPE erfme         VALUE 'M3',
+               co_fator_mil TYPE ekpo-menge    VALUE 1000,
+               co_migo_go   TYPE lvc_fname     VALUE 'MBLNR',
+               co_msc3n     TYPE lvc_fname     VALUE 'CHARG_SID'.
+    METHODS:
+      generate_alv,
+      add_selection_conditions,
+      column_settings,
+      delete_fields,
+      activate_hot_spot,
+      handle_hot_spot FOR EVENT cell_action OF if_salv_gui_field_display_opt
+        IMPORTING ev_field_name
+                  eo_row_data.
+    "handle_double_click FOR EVENT double_click OF if_salv_gui_table_display_opt
+    "  IMPORTING ev_field_name
+    "            eo_row_data.
+  PRIVATE SECTION.
+    CONSTANTS: co_dbtable TYPE dbtabl        VALUE 'ZMMV_R002_ALV'.
+    DATA: o_salv_ida    TYPE REF TO if_salv_gui_table_ida,  "CL_SALV_GUI_GRID_MODEL_IDA.
+          lt_field_disp TYPE SORTED TABLE OF fieldname WITH UNIQUE KEY table_line,
+          lv_field_name TYPE fieldname.
+
+ENDCLASS.
+CLASS lcl_add_fields DEFINITION.
+  "Capos adicionais no ALV de saída
+  PUBLIC SECTION.
+    INTERFACES: if_salv_ida_calc_field_handler.
+    "PRIVATE SECTION.
+    "Campos adicionais na listagem
+    TYPES:
+      BEGIN OF ty_add_fields,
+        "count_ph TYPE i,
+        zzerfme TYPE zmmed_erfme, "Unidade de medida alternativa
+        zzerfmg TYPE zmmed_erfmg, "Quantidade em unidade alternativa
+      END OF ty_add_fields.
+ENDCLASS.
+CLASS lcl_handle_action DEFINITION.
+  "Eventos no ALV
+  PUBLIC SECTION.
+    METHODS:
+      constructor IMPORTING io_ida TYPE REF TO if_salv_gui_table_ida,
+      handle_dbclick FOR EVENT double_click OF if_salv_gui_table_display_opt
+        IMPORTING ev_field_name
+                  eo_row_data.
+    DATA o_ida TYPE REF TO if_salv_gui_table_ida.
+ENDCLASS.
+*&---------------------------------------------------------------------*
+*& Include          ZMMR002N_SEL
+*&---------------------------------------------------------------------*
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-t01.
+SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-t02.
+
+SELECT-OPTIONS: s_werks FOR t001w-werks MEMORY ID wrk,
+                s_matnr FOR marc-matnr MATCHCODE OBJECT mat1,
+                s_lgort FOR t001l-lgort,
+                s_charg FOR mch1-charg,
+                s_bwart FOR mseg-bwart,
+                s_aufnr FOR mseg-aufnr.
+SELECTION-SCREEN END OF BLOCK b2.
+SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE TEXT-t03.
+SELECT-OPTIONS: s_mblnr FOR mkpf-mblnr,
+                s_mjahr FOR mkpf-mjahr,
+                s_budat FOR mkpf-budat OBLIGATORY,
+                s_usnam FOR mkpf-usnam ,
+                s_vgart FOR mkpf-vgart.
+SELECTION-SCREEN END OF BLOCK b3.
+SELECTION-SCREEN BEGIN OF BLOCK b4 WITH FRAME TITLE TEXT-t04.
+PARAMETERS: p_lay06 LIKE disvariant-variant. "LAYOUT
+SELECTION-SCREEN END OF BLOCK b4.
+SELECTION-SCREEN END OF BLOCK b1.
+
+*----------------------------------------------------------------------*
+* AT SELECTION-SCREEN ON VALUE-REQUEST                                 *
+*----------------------------------------------------------------------*
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_lay06.
+  PERFORM f4_layouts USING if_salv_c_layout=>restrict_none CHANGING p_lay06.
+*&---------------------------------------------------------------------*
+*& Include          ZMMR002N_IMPL
+*&---------------------------------------------------------------------*
+CLASS lcl_alv IMPLEMENTATION.
+  METHOD generate_alv.
+    DATA: ls_persistence_key TYPE if_salv_gui_layout_persistence=>ys_persistence_key, "Para definição de layoutrs
+          lv_message(200)    TYPE c,
+          lv_value           TYPE lvc_value,
+          ls_aggr_rule       TYPE if_salv_gui_types_ida=>ys_aggregation_rule,
+          lt_aggr_rules      TYPE if_salv_gui_types_ida=>yt_aggregation_rule.
+
+    TRY.
+        MESSAGE s004(zmmr_002) INTO lv_message.
+        cl_progress_indicator=>progress_indicate(
+          EXPORTING
+            i_text               = lv_message
+*            i_processed          =
+*            i_total              =
+            i_output_immediately = abap_true
+        ).
+        "Tabela base para a LISTAGEM - Foi gerada um view.
+        me->o_salv_ida = cl_salv_gui_table_ida=>create( iv_table_name = lcl_alv=>co_dbtable
+                                                        "Campos adicionais calculados
+                                                        io_calc_field_handler = NEW lcl_add_fields( ) ).
+        "Adicionar Opções de seleção dos dados
+        me->add_selection_conditions( ).
+        "Tratamento de Layouts
+        ls_persistence_key-report_name = sy-repid.
+        me->o_salv_ida->layout_persistence( )->set_persistence_options(
+                                             EXPORTING
+                                               is_persistence_key           = ls_persistence_key
+                                               i_global_save_allowed        = abap_true
+                                               i_user_specific_save_allowed = abap_true
+                                           ).
+        "Se foi setado um layout, inicia a exbição com este layout
+        IF p_lay06 IS NOT INITIAL.
+          TRY.
+              me->o_salv_ida->layout_persistence( )->set_start_layout( i_start_layout_name = p_lay06 ).
+            CATCH cx_salv_ida_unknown_name
+                  cx_salv_ida_contract_violation
+                  cx_root
+              INTO DATA(lo_ex_lay).
+              MESSAGE i005(zmmr_002) WITH p_lay06 sy-repid.
+          ENDTRY.
+        ENDIF.
+        o_salv_ida->field_catalog( )->get_available_fields( IMPORTING ets_field_names = me->lt_field_disp ).
+        me->delete_fields( ).
+        o_salv_ida->field_catalog( )->set_available_fields( EXPORTING its_field_names = me->lt_field_disp ).
+        "Atribuições de algum configurações de colunas
+        me->column_settings( ).
+        "Habilitar HOT SPOT nos campos selecionados
+        me->activate_hot_spot( ).
+        "Habilita a busca por texto na lista final
+        me->o_salv_ida->standard_functions( )->set_text_search_active( abap_true ).
+        lv_value = TEXT-001.
+        "Se a lista for gerada vazia apresenta um texto
+        me->o_salv_ida->display_options( )->set_empty_table_text( iv_empty_table_text = lv_value ).
+        "Habilia o duplo click na lista
+        me->o_salv_ida->display_options( )->enable_double_click( ).
+        "Habilitar um list-box dos layouts disponíveis
+        me->o_salv_ida->toolbar( )->enable_listbox_for_layouts( ).
+        me->o_salv_ida->display_options( )->enable_alternating_row_pattern( ).
+        MESSAGE s004(zmmr_002) INTO lv_message.
+        cl_progress_indicator=>progress_indicate(
+          EXPORTING
+            i_text               = lv_message
+*            i_processed          =
+*            i_total              =
+            i_output_immediately = abap_true
+        ).
+        "Double click handler
+        DATA(o_handle) = NEW lcl_handle_action( io_ida = o_salv_ida ).
+        SET HANDLER o_handle->handle_dbclick FOR o_salv_ida->display_options( ).
+        "EXIBIR A LISTAGEM
+        me->o_salv_ida->fullscreen( )->display( ).
+
+      CATCH cx_salv_db_connection
+            cx_salv_db_table_not_supported
+            cx_salv_ida_contract_violation
+            cx_root
+        INTO DATA(lo_exc).
+        MESSAGE lo_exc TYPE 'I'.
+    ENDTRY.
+  ENDMETHOD.
+  METHOD add_selection_conditions.
+
+    DATA(lo_cond_factory) = o_salv_ida->condition_factory( ).
+    "Idioma materiais fixado idioma de logon
+    DATA(lt_fixed_ranges) =
+      VALUE if_salv_service_types=>yt_named_ranges(
+        ( name = 'SPRAS' sign = 'I' option = 'EQ' low = sy-langu ) ).
+    "Tela de seleção
+    DATA(lo_ranges) = NEW cl_salv_range_tab_collector( ).
+    "Opções obrigatórias no relatório
+    lo_ranges->add_ranges_for_name( iv_name = 'SPRAS' it_ranges = lt_fixed_ranges[] ).
+    lo_ranges->add_ranges_for_name( iv_name = 'BUDAT' it_ranges = s_budat[] ).
+
+    IF s_werks[] IS NOT INITIAL.
+      lo_ranges->add_ranges_for_name( iv_name = 'WERKS' it_ranges = s_werks[] ).
+    ENDIF.
+    IF s_matnr[] IS NOT INITIAL.
+      lo_ranges->add_ranges_for_name( iv_name = 'MATNR' it_ranges = s_matnr[] ).
+    ENDIF.
+    IF s_lgort[] IS NOT INITIAL.
+      lo_ranges->add_ranges_for_name( iv_name = 'LGORT_SID' it_ranges = s_lgort[] ).
+    ENDIF.
+    IF s_charg[] IS NOT INITIAL.
+      lo_ranges->add_ranges_for_name( iv_name = 'CHARG_SID' it_ranges = s_charg[] ).
+    ENDIF.
+    IF s_bwart[] IS NOT INITIAL.
+      lo_ranges->add_ranges_for_name( iv_name = 'BWART' it_ranges = s_bwart[] ).
+    ENDIF.
+    IF s_aufnr[] IS NOT INITIAL.
+      lo_ranges->add_ranges_for_name( iv_name = 'AUFNR' it_ranges = s_aufnr[] ).
+    ENDIF.
+    IF s_mblnr[] IS NOT INITIAL.
+      lo_ranges->add_ranges_for_name( iv_name = 'MBLNR' it_ranges = s_mblnr[] ).
+    ENDIF.
+    IF s_mjahr[] IS NOT INITIAL.
+      lo_ranges->add_ranges_for_name( iv_name = 'MJAHR' it_ranges = s_mjahr[] ).
+    ENDIF.
+    IF s_usnam[] IS NOT INITIAL.
+      lo_ranges->add_ranges_for_name( iv_name = 'USNAM' it_ranges = s_usnam[] ).
+    ENDIF.
+    IF s_vgart[] IS NOT INITIAL.
+      lo_ranges->add_ranges_for_name( iv_name = 'VGART' it_ranges = s_vgart[] ).
+    ENDIF.
+
+    lo_ranges->get_collected_ranges( IMPORTING et_named_ranges = DATA(lt_named_ranges) ).
+    me->o_salv_ida->set_select_options( it_ranges = lt_named_ranges ).
+
+  ENDMETHOD.
+  METHOD column_settings.
+    DATA: lt_field_keys TYPE SORTED TABLE OF fieldname WITH UNIQUE KEY table_line,
+          lv_field_name TYPE fieldname.
+
+    TRY.
+        o_salv_ida->field_catalog( )->get_available_fields( IMPORTING ets_field_names = DATA(displayed_fields) ) .
+      CATCH cx_salv_ida_unknown_name
+            cx_salv_call_after_1st_display.
+
+    ENDTRY.
+
+    "Campos chave /  necessário para funciona o hotspot (link)
+    lv_field_name = 'MBLNR'.
+    INSERT lv_field_name INTO TABLE lt_field_keys.
+    lv_field_name = 'MJAHR'.
+    INSERT lv_field_name INTO TABLE lt_field_keys.
+    lv_field_name = 'ZEILE'.
+    INSERT lv_field_name INTO TABLE lt_field_keys.
+    TRY.
+        o_salv_ida->field_catalog( )->set_unique_row_key( EXPORTING its_field_names = lt_field_keys ).
+      CATCH cx_salv_ida_unknown_name
+            cx_salv_call_after_1st_display.
+    ENDTRY.
+    TRY.
+        "Campos com busca de texto
+        o_salv_ida->field_catalog( )->enable_text_search( iv_field_name = 'BKTXT' ).
+        o_salv_ida->field_catalog( )->enable_text_search( iv_field_name = 'MAKTX' ).
+      CATCH cx_salv_ida_unknown_name
+            cx_salv_call_after_1st_display.
+    ENDTRY.
+    TRY.
+        o_salv_ida->field_catalog( )->set_unit_reference_field(
+          EXPORTING
+            iv_quantity_field_name = 'ZZERFMG'
+            iv_unit_field_name     = 'ZZERFME'
+        ).
+      CATCH cx_salv_ida_contract_violation
+            cx_salv_call_after_1st_display.
+    ENDTRY.
+    TRY.
+        o_salv_ida->field_catalog( )->set_fixed_unit(
+          EXPORTING
+            iv_quantity_field_name = 'ZZERFMG'
+            iv_fixed_unit          = lcl_alv=>co_um_alter
+        ).
+      CATCH cx_salv_ida_contract_violation
+            cx_salv_call_after_1st_display.
+    ENDTRY.
+    TRY.
+        o_salv_ida->field_catalog( )->set_data_element(
+          EXPORTING
+            iv_field_name        = 'ZZERFMG'
+            iv_data_element_name = 'ZMMED_ERFMG'
+        ).
+      CATCH cx_salv_ida_unknown_name
+            cx_salv_ida_type_mismatch
+            cx_salv_call_after_1st_display.
+    ENDTRY.
+**Exiba o texto de descrição apropriado com base no domínio
+*            me->o_salv_ida->field_catalog( )->display_options( )->set_formatting( iv_field_name        = 'BWART'
+*                                                                                  iv_presentation_mode = if_salv_gui_types_ida=>cs_presentation_mode-description ).
+*    "        me->o_salv_ida->field_catalog( )->display_options( )->set_formatting( iv_field_name        = 'VGART'
+*    "                                                                              iv_presentation_mode = if_salv_gui_types_ida=>cs_presentation_mode-description ).
+*    "KZBEW
+*    "        me->o_salv_ida->field_catalog( )->display_options( )->set_formatting( iv_field_name        = 'KZBEW'
+*    "                                                                              iv_presentation_mode = if_salv_gui_types_ida=>cs_presentation_mode-description ).
+*         CATCH cx_salv_ida_unknown_name
+*                cx_salv_ill_formatting_option
+*                cx_salv_call_after_1st_display
+*            INTO DATA(lo_exc).
+*            MESSAGE lo_exc TYPE 'I'.
+*        ENDTRY.
+  ENDMETHOD.
+  METHOD activate_hot_spot.
+    TRY.
+        me->o_salv_ida->field_catalog( )->display_options( )->display_as_link_to_action( lcl_alv=>co_migo_go ).
+        SET HANDLER me->handle_hot_spot "Método a ser executado
+          FOR o_salv_ida->field_catalog( )->display_options( ).
+      CATCH cx_salv_ida_unknown_name
+            cx_salv_call_after_1st_display.
+    ENDTRY.
+  ENDMETHOD.
+  METHOD handle_hot_spot.
+    "Definição da linha da lista
+    TYPES:
+      BEGIN OF lty_output.
+        INCLUDE TYPE zmmv_r002_alv.
+        INCLUDE TYPE lcl_add_fields=>ty_add_fields.
+      TYPES END OF lty_output.
+    DATA: ls_output TYPE lty_output.
+
+    TRY.
+        eo_row_data->get_row_data(
+          EXPORTING
+            iv_request_type      = if_salv_gui_selection_ida=>cs_request_type-key_and_requested_fields
+          IMPORTING
+            es_row               = ls_output ).
+      CATCH cx_salv_ida_contract_violation
+            cx_salv_ida_sel_row_deleted.
+    ENDTRY.
+    CASE ev_field_name.
+      WHEN me->co_migo_go.
+        IF ls_output-mblnr IS NOT INITIAL.
+          AUTHORITY-CHECK OBJECT 'S_TCODE'
+            ID 'TCD' FIELD 'MIGO_GO'.
+          IF sy-subrc IS NOT INITIAL.
+            MESSAGE i001(zmmr_002) WITH 'Transação MIGO_GO'(008).
+            RETURN.
+          ENDIF.
+          SET PARAMETER ID 'MBN' FIELD ls_output-mblnr.
+          SET PARAMETER ID 'MJA' FIELD ls_output-mjahr.
+          CALL TRANSACTION 'MIGO_GO' AND SKIP FIRST SCREEN.
+        ENDIF.
+    ENDCASE.
+  ENDMETHOD.
+  METHOD delete_fields.
+    IF me->lt_field_disp[] IS NOT INITIAL.
+      DATA: lt_fldnames TYPE TABLE OF fieldname,
+            ls_fldname  LIKE LINE OF lt_fldnames.
+
+      APPEND 'KEY1'     TO lt_fldnames.
+      APPEND 'KEY2'     TO lt_fldnames.
+      APPEND 'KEY3'     TO lt_fldnames.
+      APPEND 'KEY4'     TO lt_fldnames.
+      APPEND 'KEY5'     TO lt_fldnames.
+      APPEND 'KEY6'     TO lt_fldnames.
+      APPEND 'SPRAS'    TO lt_fldnames.
+      APPEND 'MANDT'    TO lt_fldnames.
+      APPEND 'MATNR_MAKT' TO lt_fldnames.
+      APPEND 'MANDT_MAKTX' TO lt_fldnames.
+      LOOP AT lt_fldnames INTO ls_fldname.
+        DELETE me->lt_field_disp WHERE table_line = ls_fldname.
+      ENDLOOP.
+      "DELETE me->lt_field_disp FOR ALL "WHERE table_line IN lr_fldnames.
+      "lo_fldcatlog->set_available_fields( me->lt_field_disp ).
+    ENDIF.
+  ENDMETHOD.
+*$*$3
+*$*$3
+ENDCLASS.
+CLASS lcl_add_fields IMPLEMENTATION.
+  METHOD if_salv_ida_calc_field_handler~get_calc_field_structure.
+    "Estrutura com os campos adicionais ( estpa na definição desta classe
+    ro_calc_field_structure ?=
+      cl_abap_typedescr=>describe_by_name( 'TY_ADD_FIELDS' ).
+  ENDMETHOD.
+  METHOD if_salv_ida_calc_field_handler~get_requested_fields.
+    DATA lv_field_name TYPE fieldname.
+    READ TABLE its_calc_field_name
+      TRANSPORTING NO FIELDS WITH KEY table_line = 'ZZERFME'.
+    IF sy-subrc IS INITIAL.
+      lv_field_name = 'ERFME'.
+      INSERT lv_field_name INTO TABLE rts_db_field_name.
+    ENDIF.
+    READ TABLE its_calc_field_name
+      TRANSPORTING NO FIELDS WITH KEY table_line = 'ZZERFMG'.
+    IF sy-subrc IS INITIAL.
+      lv_field_name = 'ERFMG'.
+      INSERT lv_field_name INTO TABLE rts_db_field_name.
+    ENDIF.
+  ENDMETHOD.
+  METHOD if_salv_ida_calc_field_handler~calculate_line.
+    DATA: ls_matdoc_new_fields TYPE me->ty_add_fields,
+          ls_matdoc            TYPE zmmv_r002_alv,
+          l_zzerfmg            TYPE ekpo-menge.
+    "flat to structured
+    ls_matdoc = is_data_base_line.
+    "New fields
+
+    CALL FUNCTION 'MD_CONVERT_MATERIAL_UNIT'
+      EXPORTING
+        i_matnr              = ls_matdoc-matnr
+        i_in_me              = ls_matdoc-erfme
+        i_out_me             = lcl_alv=>co_um_alter  "ls_matdoc_new_fields-zzerfme
+        i_menge              = lcl_alv=>co_fator_mil "ls_matdoc-erfmg
+      IMPORTING
+        e_menge              = l_zzerfmg
+      EXCEPTIONS
+        error_in_application = 1
+        error                = 2
+        OTHERS               = 3.
+    IF sy-subrc = 0.
+      IF l_zzerfmg > 0.
+        ls_matdoc_new_fields-zzerfme = lcl_alv=>co_um_alter.
+        ls_matdoc_new_fields-zzerfmg = ( ( ls_matdoc-erfmg * l_zzerfmg ) / lcl_alv=>co_fator_mil ).
+      ENDIF.
+    ENDIF.
+    "Send it back
+    es_calculated_fields = ls_matdoc_new_fields.
+
+  ENDMETHOD.
+  METHOD if_salv_ida_calc_field_handler~start_page.
+  ENDMETHOD.
+  METHOD if_salv_ida_calc_field_handler~end_page.
+
+  ENDMETHOD.
+ENDCLASS.
+CLASS lcl_handle_action IMPLEMENTATION.
+  METHOD constructor.
+    o_ida = io_ida.
+  ENDMETHOD.
+  METHOD handle_dbclick.
+    TYPES:
+      BEGIN OF ltp_line.
+        INCLUDE TYPE zmmv_r002_alv.
+        INCLUDE TYPE lcl_add_fields=>ty_add_fields.
+      TYPES END OF ltp_line.
+    DATA: ls_line TYPE ltp_line.
+***   get double-clicked line and put into output
+    eo_row_data->get_row_data( EXPORTING iv_request_type = if_salv_gui_selection_ida=>cs_request_type-all_fields
+                               IMPORTING es_row =  ls_line ).
+    CASE ev_field_name.
+      WHEN lcl_alv=>co_msc3n.
+        IF ls_line-charg_sid IS NOT INITIAL.
+          AUTHORITY-CHECK OBJECT 'S_TCODE'
+            ID 'TCD' FIELD 'MSC3N'.
+          IF sy-subrc IS NOT INITIAL.
+            MESSAGE i001(zmmr_002) WITH 'Transação MSC3N'(008).
+            RETURN.
+          ENDIF.
+          SET PARAMETER ID 'MAT' FIELD ls_line-matnr.
+          SET PARAMETER ID 'CHA' FIELD ls_line-charg_sid.
+          SET PARAMETER ID 'WRK' FIELD ls_line-werks.
+          SET PARAMETER ID 'LAG' FIELD ls_line-lgort_sid.
+          CALL TRANSACTION 'MSC3N' AND SKIP FIRST SCREEN.
+        ENDIF.
+      WHEN OTHERS.
+        cl_salv_ida_show_data_row=>display( iv_text = 'Detalhes'(007)
+                                            is_data = ls_line ).
+    ENDCASE.
+  ENDMETHOD.
+ENDCLASS.
+----------------------------------------------------------------------*
+***INCLUDE ZMMR002N_F01.
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Form  f4_layouts
+*&---------------------------------------------------------------------*
+* §4.5 F4 Layouts
+*      cl_salv_layout provides a method for handling the f4 help of the
+*      layouts for the specified layout key. It is also possible to use
+*      the static class cl_salv_layout_service.
+*----------------------------------------------------------------------*
+FORM f4_layouts USING i_restrict TYPE salv_de_layout_restriction
+             CHANGING c_layout TYPE disvariant-variant.
+
+  DATA: ls_layout TYPE salv_s_layout_info,
+        ls_key    TYPE salv_s_layout_key.
+
+  ls_key-report = sy-repid.
+
+  ls_layout = cl_salv_layout_service=>f4_layouts(
+    s_key    = ls_key
+    restrict = i_restrict ).
+
+  c_layout = ls_layout-layout.
+
+ENDFORM.                    " f4_layouts
