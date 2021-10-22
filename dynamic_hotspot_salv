@@ -1,0 +1,30 @@
+CONSTANTS:
+    BEGIN OF c_hotspot_fields,
+      me53  TYPE lvc_fname VALUE 'BANFN',
+      me23  TYPE lvc_fname VALUE 'EBELN',
+      vl33n TYPE lvc_fname VALUE 'VBELN',
+    END OF c_hotspot_fields.
+ METHOD activate_hot_spot.
+    DATA: lr_columns    TYPE REF TO cl_salv_columns,
+          lr_column     TYPE REF TO cl_salv_column_table,
+          ref_descr     TYPE REF TO cl_abap_structdescr,
+          it_components TYPE abap_compdescr_tab,
+          lcomp_name    TYPE string.
+    lr_columns = gr_table->get_columns( ).
+
+    FIELD-SYMBOLS: <fs_hotspot> TYPE lvc_fname.
+    ref_descr ?= cl_abap_typedescr=>describe_by_data( me->c_hotspot_fields ).
+    it_components[] = ref_descr->components[].
+    LOOP AT it_components INTO DATA(ls_compnt).
+      ASSIGN COMPONENT ls_compnt-name OF STRUCTURE me->c_hotspot_fields TO <fs_hotspot>.
+      IF <fs_hotspot> IS NOT ASSIGNED.
+        CONTINUE.
+      ENDIF.
+      TRY.
+          lr_column ?= lr_columns->get_column( <fs_hotspot> ).
+          lr_column->set_cell_type( if_salv_c_cell_type=>hotspot ).
+        CATCH cx_salv_not_found.                        "#EC NO_HANDLER
+      ENDTRY.
+      UNASSIGN
+        <fs_hotspot>.
+    ENDLOOP.    
