@@ -1,0 +1,9 @@
+     CREATE OBJECT regex
+        EXPORTING
+          pattern     = '\w+(\.\w+)*@(\w+\.)+(\w{2,4})'
+          ignore_case = abap_true.
+      matcher = regex->create_matcher( text = me->w_input-mt_sap_xi_bp_ins-communication-smtp_contact-e_mail ).
+      IF matcher->match( ) IS INITIAL.
+        "handle error
+      ENDIF.
+    ENDIF.
