@@ -1,0 +1,60 @@
+  DATA: t_selname         TYPE TABLE OF string.
+  DATA:
+      lv_range_name   TYPE string,
+      lt_fixed_ranges TYPE if_salv_service_types=>yt_named_ranges.
+    FIELD-SYMBOLS:
+      <fs_range> TYPE STANDARD TABLE.
+  METHOD get_rsparams.
+*&---------------------------------------------------------------------*
+*&     Recuperar todos os SELECT-OPTIONS da Selection Screen
+*&---------------------------------------------------------------------*
+
+    DATA:
+      l_cprog          TYPE syst_cprog,
+      t_select_opt_tab TYPE TABLE OF rsparams.
+    IF im_cprog IS NOT SUPPLIED OR im_cprog IS INITIAL.
+      l_cprog = sy-cprog.
+    ELSE.
+      l_cprog  = sy-cprog.
+    ENDIF.
+    CALL FUNCTION 'RS_REFRESH_FROM_SELECTOPTIONS'
+      EXPORTING
+        curr_report     = l_cprog
+        "IMPORTING
+        "SP              =
+      TABLES
+        selection_table = t_select_opt_tab
+  "     SELECTION_TABLE_255       =
+      EXCEPTIONS
+        not_found       = 1
+        no_report       = 2
+        OTHERS          = 3.
+    IF sy-subrc IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+    LOOP AT t_select_opt_tab INTO DATA(ls_sel).
+      "Somente SELECT-OPTIONS
+      IF ls_sel-kind = 'S'.
+        APPEND ls_sel-selname TO me->t_selname.
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+  LOOP AT me->t_selname INTO DATA(ls_range).
+      CONCATENATE
+        ls_range
+        '[]'
+        INTO lv_range_name.
+      CONDENSE lv_range_name NO-GAPS.
+      ASSIGN (lv_range_name) TO <fs_range>.
+      IF <fs_range> IS ASSIGNED AND
+         <fs_range>[] IS NOT INITIAL.
+        lo_ranges->add_ranges_for_name( iv_name = me->get_field_name_cds( ls_range ) it_ranges = <fs_range>[] ).
+      ENDIF.
+      CLEAR:
+        lv_range_name.
+      UNASSIGN:
+       <fs_range>.
+    ENDLOOP.
+    lo_ranges->get_collected_ranges( IMPORTING et_named_ranges = DATA(lt_named_ranges) ).
+    me->o_salv_ida->set_select_options( it_ranges = lt_named_ranges ).
