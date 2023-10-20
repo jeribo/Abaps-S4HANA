@@ -4,7 +4,7 @@ class ZCL_ABAP_UTILS definition
   create public .
 
 public section.
-
+  type-pools RS .
   class-methods CONSTANT_TO_RANGE
     importing
       value(IM_CONSTANT) type ANY
