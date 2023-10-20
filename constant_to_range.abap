@@ -1,3 +1,26 @@
+class ZCL_ABAP_UTILS definition
+  public
+  final
+  create public .
+
+public section.
+
+  class-methods CONSTANT_TO_RANGE
+    importing
+      value(IM_CONSTANT) type ANY
+    exporting
+      value(EX_RANGE_TAB) type STANDARD TABLE .
+endclass.
+
+
+CLASS ZCL_ABAP_UTILS IMPLEMENTATION.
+* <SIGNATURE>---------------------------------------------------------------------------------------+
+* | Static Public Method ZCL_ABAP_UTILS=>CONSTANT_TO_RANGE
+* +-------------------------------------------------------------------------------------------------+
+* | [--->] IM_CONSTANT                    TYPE        ANY
+* | [<---] EX_RANGE_TAB                   TYPE        STANDARD TABLE
+* +--------------------------------------------------------------------------------------</SIGNATURE>
+  METHOD constant_to_range.
     DATA:
       ref_descr     TYPE REF TO cl_abap_structdescr,
       it_components TYPE abap_compdescr_tab,
@@ -24,6 +47,5 @@
       ASSIGN COMPONENT 'LOW' OF STRUCTURE <line> TO <fs_any>.
       <fs_any> = <value>.
       UNASSIGN <fs_any>.
-
-
-    ENDLOOP.
+    ENDMETHOD.
+ENDCLASS.
