@@ -1,0 +1,91 @@
+ METHOD read_resultrecord.
+**********************************************************************
+*--------------------------------------------------------------------*
+* Objetivo....: Faz uso da classe stadard para retorno do payroll    *
+*               Não podemos usar banco de dados lógico em OO         *
+*               A classe standard serve a e este propósito           *
+*--------------------------------------------------------------------*
+**********************************************************************
+    FIELD-SYMBOLS:
+      <pernr_pr> TYPE REF TO cl_hr_pay_result,
+      <any>      TYPE any.
+    "    DATA:
+    "     lt_result TYPE TABLE OF zhcm_s_payroll_r.
+    "Recuperar Colaboradores to-do: Avaliar filtros
+    get_list_pernr( ).
+    SORT gt_pernr_tab BY pernr.
+    DELETE ADJACENT DUPLICATES FROM gt_pernr_tab.
+    "Recupera entrada descritivos rúbricas
+    get_wage_types( ).
+    SORT gt_wage_types BY molga sprsl lgart.
+
+    IF gt_pernr_tab[] IS INITIAL.
+      RETURN.
+    ENDIF.
+    "Instancia classe de leitura do resultado do  payroll
+    cl_hrpay99_prr_4_pnp_reps=>get_instance(
+      EXPORTING
+*        im_payty_selopt         =                  " select options for payty
+        im_pn_begda             =  pa_begda         " Valid from date
+        im_pn_endda             =  pa_endda         " End of Validity Period
+*        im_ipview               = x_true           " In-view payroll periods
+        im_molga                = pa_molga          " Country Grouping
+*        im_add_retroes_to_rgdir = x_true           " Include retroactive accounting: no, yes, also retr accg runs
+*        im_curr_conv            =                  " Structure for the Currency Conversion
+*        im_pnpabkrs             =                  " Payroll Area (RANGE Table)
+*        im_pn_paper             =
+*        im_pn_permo             =                  " Period Parameters
+*        im_payty                =                  " Payroll Type
+*        im_payid                =                  " Payroll Identifier
+*        im_bondt                =                  " Off-cycle payroll payment date
+*        im_osr_del_opt          = 'P'              " Delete Options for OSR
+*        im_ocrsn_selopt         =                  " Select Option: Reason for Off-Cycle Payroll Run
+*        im_occat_selopt         =                  " Select Option: Category for Off-Cycle Reason
+        im_pnpdisbd             = pa_begda          " Data Select. Period Start Date: Empty if Time Span Selected
+*        im_arch_too             = x_false          " Consider and Display Archived Payroll Results
+      IMPORTING
+        ex_prr                  =  g_reader_hrpay   " Payroll Results Reader for PNP Reports
+      EXCEPTIONS
+        invalid_entries         = 1                " Invalid Parameter Entered
+        OTHERS                  = 2
+    ).
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+      return.
+    ENDIF.
+
+    LOOP AT gt_pernr_tab INTO DATA(pernr). "<<< percorrer colaboradores
+      "ler resultado paytoll individual do colaborador
+      g_reader_hrpay->get_pernr_payr_results_allin1(
+        EXPORTING
+          im_pernr                      = pernr-pernr
+        IMPORTING
+          ex_pernr_payroll_results      = gt_pernr_pr "<<instância payrooll
+        EXCEPTIONS
+          country_version_not_available = 1
+          no_authorization              = 2
+          no_entries_found              = 3
+          read_error                    = 4
+          OTHERS                        = 5 ).
+      IF sy-subrc <> 0.
+       MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+         WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+       CONTINUE.
+      ENDIF.
+      LOOP AT gt_pernr_pr ASSIGNING <pernr_pr>.
+        IF "<pernr_pr>->period-fpper NE <pernr_pr>->period-inper OR "OR <pernr_pr>->period-fpper NE pn-paper OR
+           <pernr_pr>->period-fpper EQ 'X' OR <pernr_pr>->period-fpper = '000000' .
+          CONTINUE.
+        ELSE.
+          LOOP AT <pernr_pr>->inter-rt INTO DATA(ls_rt). "<<rt table
+            APPEND INITIAL LINE TO ex_result "<< APPEND resultado
+              ASSIGNING FIELD-SYMBOL(<result>).
+            MOVE-CORRESPONDING pernr TO <result>.
+            MOVE-CORRESPONDING <pernr_pr>->period TO <result>.
+            MOVE-CORRESPONDING ls_rt to <result>.
+          ENDLOOP.
+        ENDIF.
+      ENDLOOP.
+      "ex_result = CORRESPONDING #( lt_result ).
+    ENDLOOP.
